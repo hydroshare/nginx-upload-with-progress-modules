@@ -1,8 +1,9 @@
-FROM alpine:3.4
+FROM alpine:3.15.0
 
-MAINTAINER Dmitriy Belyaev "dimabelyaev27@gmail.com"
 
-ENV NGINX_VERSION 1.13.6
+MAINTAINER Alva Couch "acouch@cuahsi.org"
+
+ENV NGINX_VERSION 1.20.2
 
 COPY install.sh /usr/src/
 COPY nginx.key /usr/src/
