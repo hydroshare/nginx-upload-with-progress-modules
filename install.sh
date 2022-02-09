@@ -2,31 +2,62 @@
 set -e
 
 # Base setup
-addgroup -S nginx \
-  && adduser -D -S -h /var/cache/nginx -s /sbin/nologin -G nginx nginx \
-  && apk add --no-cache --virtual .build-deps \
-    curl \
-    gcc \
-    gd-dev \
-    geoip-dev \
-    git \
-    gnupg \
-    libc-dev \
-    libxslt-dev \
-    linux-headers \
-    make \
-    openssh \
-    openssl-dev \
-    pcre-dev \
-    perl-dev \
-    unzip \
-    zlib-dev \
+addgroup --system nginx 
+adduser --system --home /var/cache/nginx --shell /sbin/nologin --disabled-password --ingroup nginx nginx 
+apt-get update
+apt-get install -y wget curl git gnupg gcc g++ make unzip libc-dev libgd-dev libgeoip-dev 
+apt-get install -y  libxslt1-dev libxml2-dev libperl-dev 
+
+mkdir -p /usr/src 
+cd /usr/src 
+
+# install an unsupported, obsolete, and not generally available pcre
+wget https://osdn.net/projects/sfnet_pcre/downloads/pcre/8.45/pcre-8.45.tar.gz
+tar -zxf pcre-8.45.tar.gz 
+cd pcre-8.45
+./configure
+make
+make install 
+cd ..
+
+wget http://zlib.net/zlib-1.2.11.tar.gz
+tar -zxf zlib-1.2.11.tar.gz
+cd zlib-1.2.11
+./configure
+make
+make install
+cd ..
+
+# install an unsupported, obsolete openssl source tree
+wget http://www.openssl.org/source/openssl-1.1.1g.tar.gz
+tar zxf openssl-1.1.1g.tar.gz
+cd openssl-1.1.1g
+./Configure linux-x86_64 --prefix=/usr
+make
+make install
+cd ..
 
 
-# Install GPG keys
-gpg --import /usr/src/nginx.key
+# download both contributed modules
+mkdir -p /usr/src/upload
+cd /usr/src/upload
+git clone https://github.com/vkholodkov/nginx-upload-module.git
+cd nginx-upload-module
+git checkout 2.255
+mkdir -p /usr/src/progress
+cd /usr/src/progress
+curl -fSLO https://github.com/masterzen/nginx-upload-progress-module/archive/master.zip
+unzip master.zip
 
-CONFIG="\
+cd /usr/src
+wget https://nginx.org/download/nginx-1.20.2.tar.gz
+tar zxf nginx-1.20.2.tar.gz
+cd nginx-1.20.2
+
+./configure \
+        --with-pcre=../pcre-8.45 \
+        --with-zlib=../zlib-1.2.11 \
+        --with-openssl=../openssl-1.1.1g \
         --prefix=/etc/nginx \
         --sbin-path=/usr/sbin/nginx \
         --modules-path=/usr/lib/nginx/modules \
@@ -67,73 +98,23 @@ CONFIG="\
         --with-mail_ssl_module \
         --with-file-aio \
         --with-http_v2_module \
-        --with-ipv6 \
         --add-module=/usr/src/progress/nginx-upload-progress-module-master \
-        --add-module=/usr/src/upload/nginx-upload-module \
-    "
-curl -fSL http://nginx.org/download/nginx-$NGINX_VERSION.tar.gz -o nginx.tar.gz
-curl -fSL http://nginx.org/download/nginx-$NGINX_VERSION.tar.gz.asc  -o nginx.tar.gz.asc
-gpg --batch --verify nginx.tar.gz.asc nginx.tar.gz
-export GNUPGHOME="$(mktemp -d)"
-rm -r "$GNUPGHOME" nginx.tar.gz.asc
-mkdir -p /usr/src
-tar -zxC /usr/src -f nginx.tar.gz
-rm nginx.tar.gz
-mkdir -p /usr/src/upload
-cd /usr/src/upload
-git clone https://github.com/vkholodkov/nginx-upload-module.git
-cd nginx-upload-module
-git checkout 2.255
-mkdir -p /usr/src/progress
-cd /usr/src/progress
-curl -fSLO https://github.com/masterzen/nginx-upload-progress-module/archive/master.zip
-unzip master.zip
-cd /usr/src/nginx-$NGINX_VERSION
-./configure $CONFIG --with-debug
-make -j$(getconf _NPROCESSORS_ONLN)
-mv objs/nginx objs/nginx-debug
-mv objs/ngx_http_xslt_filter_module.so objs/ngx_http_xslt_filter_module-debug.so
-mv objs/ngx_http_image_filter_module.so objs/ngx_http_image_filter_module-debug.so
-mv objs/ngx_http_geoip_module.so objs/ngx_http_geoip_module-debug.so
-mv objs/ngx_http_perl_module.so objs/ngx_http_perl_module-debug.so
-./configure $CONFIG
-make -j$(getconf _NPROCESSORS_ONLN)
+        --add-module=/usr/src/upload/nginx-upload-module 
+
+make
 make install
+
 rm -rf /etc/nginx/html/
 mkdir -p /etc/nginx/conf.d/
 mkdir -p /usr/share/nginx/html/
 install -m644 html/index.html /usr/share/nginx/html/
 install -m644 html/50x.html /usr/share/nginx/html/
-install -m755 objs/nginx-debug /usr/sbin/nginx-debug
-install -m755 objs/ngx_http_xslt_filter_module-debug.so /usr/lib/nginx/modules/ngx_http_xslt_filter_module-debug.so
-install -m755 objs/ngx_http_image_filter_module-debug.so /usr/lib/nginx/modules/ngx_http_image_filter_module-debug.so
-install -m755 objs/ngx_http_geoip_module-debug.so /usr/lib/nginx/modules/ngx_http_geoip_module-debug.so
-install -m755 objs/ngx_http_perl_module-debug.so /usr/lib/nginx/modules/ngx_http_perl_module-debug.so
-ln -s ../../usr/lib/nginx/modules /etc/nginx/modules
+ln -s /usr/lib/nginx/modules /etc/nginx/modules
 strip /usr/sbin/nginx*
 strip /usr/lib/nginx/modules/*.so
-rm -rf /usr/src/nginx-$NGINX_VERSION
-rm -rf /usr/src/upload
-rm -rf /usr/src/progress
-
-# Bring in gettext so we can get `envsubst`, then throw
-# the rest away. To do this, we need to install `gettext`
-# then move `envsubst` out of the way so `gettext` can
-# be deleted completely, then move `envsubst` back.
-apk add --no-cache --virtual .gettext gettext
-mv /usr/bin/envsubst /tmp/
-
-runDeps="$(
-    scanelf --needed --nobanner /usr/sbin/nginx /usr/lib/nginx/modules/*.so /tmp/envsubst \
-        | awk '{ gsub(/,/, "\nso:", $2); print "so:" $2 }' \
-        | sort -u \
-        | xargs -r apk info --installed \
-        | sort -u \
-)"
-
-apk add --no-cache --virtual .nginx-rundeps $runDeps
-apk del .gettext
-mv /tmp/envsubst /usr/local/bin/
+# rm -rf /usr/src/nginx-$NGINX_VERSION
+# rm -rf /usr/src/upload
+# rm -rf /usr/src/progress
 
 # forward request and error logs to docker log collector
 ln -sf /dev/stdout /var/log/nginx/access.log

@@ -1,9 +1,12 @@
-FROM alpine:3.15.0
+FROM debian:bullseye-slim
 
+LABEL maintainer="Alva Couch <acouch@cuahsi.org>"
+
+ENV NGINX_VERSION   1.20.2
+ENV NJS_VERSION     0.7.0
+ENV PKG_RELEASE     1~bullseye
 
 MAINTAINER Alva Couch "acouch@cuahsi.org"
-
-ENV NGINX_VERSION 1.20.2
 
 COPY install.sh /usr/src/
 COPY nginx.key /usr/src/
